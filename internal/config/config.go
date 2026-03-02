@@ -94,6 +94,21 @@ type SelectedModel struct {
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
+// PoolNode represents a single compute pool node (an Ollama instance).
+type PoolNode struct {
+	Provider  string `json:"provider" jsonschema:"description=Provider ID from crush.json (e.g. ollama-msi),required"`
+	HealthURL string `json:"health_url" jsonschema:"description=Ollama /api/tags endpoint for health checking,required"`
+	Priority  int    `json:"priority" jsonschema:"description=Lower number = higher priority,default=10"`
+}
+
+// PoolConfig holds the compute pool routing configuration.
+// When a user passes --model "pool/model-name", Crush health-checks
+// nodes in priority order and routes to the first healthy node that
+// has the requested model.
+type PoolConfig struct {
+	Nodes []PoolNode `json:"nodes" jsonschema:"description=Ordered list of compute pool nodes"`
+}
+
 type ProviderConfig struct {
 	// The provider's id.
 	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
@@ -393,6 +408,8 @@ type Config struct {
 	Options *Options `json:"options,omitempty" jsonschema:"description=General application options"`
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
+
+	Pool *PoolConfig `json:"pool,omitempty" jsonschema:"description=Compute pool configuration for routing to the best available Ollama node"`
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 

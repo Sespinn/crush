@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/pool"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -333,6 +334,27 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 // If largeModel is provided but smallModel is not, the small model defaults to
 // the provider's default small model.
 func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
+	// Pool resolution: if model starts with "pool/", health-check nodes
+	// and resolve to the best available provider/model.
+	if pool.IsPoolModel(largeModel) || pool.IsPoolModel(smallModel) {
+		poolCfg := app.poolConfig()
+		registered := app.registeredModels()
+		if pool.IsPoolModel(largeModel) {
+			resolved, err := pool.Resolve(poolCfg, registered, largeModel)
+			if err != nil {
+				return err
+			}
+			largeModel = resolved
+		}
+		if pool.IsPoolModel(smallModel) {
+			resolved, err := pool.Resolve(poolCfg, registered, smallModel)
+			if err != nil {
+				return err
+			}
+			smallModel = resolved
+		}
+	}
+
 	providers := app.config.Providers.Copy()
 
 	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
@@ -376,6 +398,39 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 	}
 
 	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// poolConfig returns the pool configuration, converting from config types
+// to pool package types. Returns an empty config if pool is not configured.
+func (app *App) poolConfig() pool.Config {
+	if app.config.Pool == nil {
+		return pool.Config{}
+	}
+	nodes := make([]pool.Node, len(app.config.Pool.Nodes))
+	for i, n := range app.config.Pool.Nodes {
+		nodes[i] = pool.Node{
+			Provider:  n.Provider,
+			HealthURL: n.HealthURL,
+			Priority:  n.Priority,
+		}
+	}
+	return pool.Config{Nodes: nodes}
+}
+
+// registeredModels builds a map of provider -> registered model IDs from the Crush config.
+// Used by the pool resolver to ensure a model is both available on hardware
+// AND registered in the config before routing to it.
+func (app *App) registeredModels() pool.ProviderModels {
+	providers := app.config.Providers.Copy()
+	result := make(pool.ProviderModels, len(providers))
+	for name, p := range providers {
+		models := make([]string, len(p.Models))
+		for i, m := range p.Models {
+			models[i] = m.ID
+		}
+		result[name] = models
+	}
+	return result
 }
 
 // GetDefaultSmallModel returns the default small model for the given
